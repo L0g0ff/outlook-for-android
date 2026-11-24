@@ -1,6 +1,7 @@
 package nl.wapnet.outlookwrapper;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
@@ -9,6 +10,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Message;
+import android.view.KeyEvent;
 import android.webkit.CookieManager;
 import android.webkit.MimeTypeMap;
 import android.webkit.URLUtil;
@@ -25,6 +27,19 @@ public final class MainActivity extends Activity {
     // At most one picker is open; a recreated Activity starts with null, so a late result is dropped.
     private ValueCallback<Uri[]> fileChooserCallback;
     private WebView webView;
+    private boolean volumeUpDown;
+    private boolean volumeDownDown;
+    private AlertDialog openDialog;
+    private static final String VIEWPORT_WIDTH = "viewport_width";
+    // CSS pixels the page lays out in; 0 keeps Outlook's own device-width viewport.
+    private static final int[] VIEWPORT_WIDTHS = {0, 480, 600, 800, 1024};
+    // Rewrites the viewport meta tag and keeps it rewritten when Outlook touches it again.
+    private static final String VIEWPORT_SCRIPT = "(w=>{window.__vpWidth=w;const set=()=>{"
+            + "let m=document.querySelector('meta[name=viewport]');if(!m){m=document.createElement('meta');"
+            + "m.name='viewport';document.head.appendChild(m)}const c='width='+window.__vpWidth;"
+            + "if(m.content!==c)m.content=c};set();if(!window.__vpObserver){window.__vpObserver=new MutationObserver(set);"
+            + "window.__vpObserver.observe(document.head,{subtree:true,childList:true,attributes:true,"
+            + "attributeFilter:['content']})}})(%d)";
 
     @Override
     protected void onCreate(Bundle state) {
@@ -39,6 +54,8 @@ public final class MainActivity extends Activity {
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
         settings.setUseWideViewPort(true);
+        // Zooms out to fit when a wider viewport width is chosen in the menu.
+        settings.setLoadWithOverviewMode(true);
         // Desktop identity, Android input: passes platform-scoped "use the Outlook app/Edge" policies.
         settings.setUserAgentString(UserAgent.desktop(settings.getUserAgentString()));
         // target=_blank links arrive in onCreateWindow instead of replacing Outlook.
@@ -62,6 +79,11 @@ public final class MainActivity extends Activity {
                 }
                 openLink(url);
                 return true;
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                applyViewportWidth();
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
@@ -189,6 +211,79 @@ public final class MainActivity extends Activity {
         callback.onReceiveValue(files);
     }
 
+    private int viewportWidth() {
+        return getPreferences(MODE_PRIVATE).getInt(VIEWPORT_WIDTH, 0);
+    }
+
+    private void applyViewportWidth() {
+        int width = viewportWidth();
+        if (width > 0 && Links.opensInApp(webView.getUrl())) {
+            webView.evaluateJavascript(String.format(java.util.Locale.ROOT, VIEWPORT_SCRIPT, width), null);
+        }
+    }
+
+    // Menu on volume up + down together; a single volume key keeps changing the volume.
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            volumeUpDown = true;
+        } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            volumeDownDown = true;
+        } else {
+            return super.onKeyDown(keyCode, event);
+        }
+        if (volumeUpDown && volumeDownDown) {
+            // Holding the keys repeats onKeyDown; only the first press opens the menu.
+            if (event.getRepeatCount() == 0) {
+                showMenu();
+            }
+            return true;
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            volumeUpDown = false;
+        } else if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            volumeDownDown = false;
+        }
+        return super.onKeyUp(keyCode, event);
+    }
+
+    private void showMenu() {
+        if (openDialog != null && openDialog.isShowing()) {
+            return;
+        }
+        String[] items = {getString(R.string.menu_resolution)};
+        Runnable[] actions = {this::showResolutionMenu};
+        openDialog = new AlertDialog.Builder(this)
+                .setItems(items, (d, which) -> actions[which].run())
+                .show();
+    }
+
+    private void showResolutionMenu() {
+        String[] labels = new String[VIEWPORT_WIDTHS.length];
+        int checked = 0;
+        for (int i = 0; i < labels.length; i++) {
+            labels[i] = VIEWPORT_WIDTHS[i] == 0 ? getString(R.string.resolution_default)
+                    : getString(R.string.resolution_width, VIEWPORT_WIDTHS[i]);
+            if (VIEWPORT_WIDTHS[i] == viewportWidth()) {
+                checked = i;
+            }
+        }
+        openDialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.menu_resolution)
+                .setSingleChoiceItems(labels, checked, (d, which) -> {
+                    d.dismiss();
+                    getPreferences(MODE_PRIVATE).edit().putInt(VIEWPORT_WIDTH, VIEWPORT_WIDTHS[which]).apply();
+                    // Reload so the page starts from its own viewport, then onPageFinished applies the choice.
+                    webView.reload();
+                })
+                .show();
+    }
+
     @Override
     public void onBackPressed() {
         if (webView.canGoBack()) {
@@ -209,6 +304,9 @@ public final class MainActivity extends Activity {
         if (fileChooserCallback != null) {
             fileChooserCallback.onReceiveValue(null);
             fileChooserCallback = null;
+        }
+        if (openDialog != null) {
+            openDialog.dismiss();
         }
         webView.destroy();
         super.onDestroy();
