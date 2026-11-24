@@ -4,7 +4,9 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -31,6 +33,9 @@ public final class MainActivity extends Activity {
     private boolean volumeDownDown;
     private AlertDialog openDialog;
     private static final String VIEWPORT_WIDTH = "viewport_width";
+    private static final String THEME = "theme";
+    // Stored as the index of the Theme menu choice.
+    private static final int THEME_SYSTEM = 0, THEME_LIGHT = 1, THEME_DARK = 2;
     // CSS pixels the page lays out in; 0 keeps Outlook's own device-width viewport.
     private static final int[] VIEWPORT_WIDTHS = {0, 480, 600, 800, 1024};
     // Rewrites the viewport meta tag and keeps it rewritten when Outlook touches it again.
@@ -40,6 +45,19 @@ public final class MainActivity extends Activity {
             + "if(m.content!==c)m.content=c};set();if(!window.__vpObserver){window.__vpObserver=new MutationObserver(set);"
             + "window.__vpObserver.observe(document.head,{subtree:true,childList:true,attributes:true,"
             + "attributeFilter:['content']})}})(%d)";
+
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(base);
+        // Same file as getPreferences(), which is not available yet here.
+        int theme = base.getSharedPreferences(getClass().getSimpleName(), MODE_PRIVATE).getInt(THEME, THEME_SYSTEM);
+        if (theme != THEME_SYSTEM) {
+            // Picks values-night (or not) for the app theme; WebView derives prefers-color-scheme from it.
+            Configuration night = new Configuration();
+            night.uiMode = theme == THEME_DARK ? Configuration.UI_MODE_NIGHT_YES : Configuration.UI_MODE_NIGHT_NO;
+            applyOverrideConfiguration(night);
+        }
+    }
 
     @Override
     protected void onCreate(Bundle state) {
@@ -56,6 +74,11 @@ public final class MainActivity extends Activity {
         settings.setUseWideViewPort(true);
         // Zooms out to fit when a wider viewport width is chosen in the menu.
         settings.setLoadWithOverviewMode(true);
+        if (Build.VERSION.SDK_INT >= 33) {
+            // ponytail: Android 13+ only. Darkens pages without their own dark style (e.g. some mails)
+            // when the app theme is dark; Outlook's own dark theme takes precedence where it has one.
+            settings.setAlgorithmicDarkeningAllowed(true);
+        }
         // Desktop identity, Android input: passes platform-scoped "use the Outlook app/Edge" policies.
         settings.setUserAgentString(UserAgent.desktop(settings.getUserAgentString()));
         // target=_blank links arrive in onCreateWindow instead of replacing Outlook.
@@ -256,8 +279,8 @@ public final class MainActivity extends Activity {
         if (openDialog != null && openDialog.isShowing()) {
             return;
         }
-        String[] items = {getString(R.string.menu_resolution)};
-        Runnable[] actions = {this::showResolutionMenu};
+        String[] items = {getString(R.string.menu_resolution), getString(R.string.menu_theme)};
+        Runnable[] actions = {this::showResolutionMenu, this::showThemeMenu};
         openDialog = new AlertDialog.Builder(this)
                 .setItems(items, (d, which) -> actions[which].run())
                 .show();
@@ -280,6 +303,19 @@ public final class MainActivity extends Activity {
                     getPreferences(MODE_PRIVATE).edit().putInt(VIEWPORT_WIDTH, VIEWPORT_WIDTHS[which]).apply();
                     // Reload so the page starts from its own viewport, then onPageFinished applies the choice.
                     webView.reload();
+                })
+                .show();
+    }
+
+    private void showThemeMenu() {
+        String[] labels = {getString(R.string.theme_system), getString(R.string.theme_light), getString(R.string.theme_dark)};
+        openDialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.menu_theme)
+                .setSingleChoiceItems(labels, getPreferences(MODE_PRIVATE).getInt(THEME, THEME_SYSTEM), (d, which) -> {
+                    d.dismiss();
+                    getPreferences(MODE_PRIVATE).edit().putInt(THEME, which).apply();
+                    // The theme is chosen in attachBaseContext; the signed-in session survives in cookies.
+                    recreate();
                 })
                 .show();
     }
