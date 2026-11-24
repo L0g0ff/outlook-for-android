@@ -1,0 +1,78 @@
+name: Build and release
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Self-checks
+        run: |
+          javac -d "$RUNNER_TEMP/checks" app/src/main/java/nl/wapnet/outlookwrapper/{Links,FileName,UserAgent}.java
+          for c in Links FileName UserAgent; do java -ea -cp "$RUNNER_TEMP/checks" "nl.wapnet.outlookwrapper.$c"; done
+      - run: ./gradlew lintDebug assembleRelease
+
+  release:
+    # Same-repo PRs get a signed pre-release for device testing; fork PRs have no secrets.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Restore release keystore
+        run: printf '%s' "$ANDROID_SIGNING_KEY" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+        env:
+          ANDROID_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY }}
+      - name: Build signed APK
+        run: ./gradlew assembleRelease
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      - name: Publish GitHub Release
+        run: |
+          aapt=$(ls "$ANDROID_HOME"/build-tools/*/aapt | sort -V | tail -1)
+          version=$("$aapt" dump badging app/build/outputs/apk/release/app-release.apk | sed -n "s/^package:.*versionName='\([^']*\)'.*/\1/p")
+          test -n "$version"
+          if [ -n "$PR_NUMBER" ]; then
+            # One rolling pre-release per PR, never marked Latest.
+            tag="pr-$PR_NUMBER"
+            gh release delete "$tag" --yes --cleanup-tag || true
+            flags=(--prerelease --latest=false --title "PR #$PR_NUMBER test build ($version)"
+                   --notes "Signed test build of #$PR_NUMBER at $PR_HEAD_SHA. Installs over the regular app.")
+            target="$PR_HEAD_SHA"
+          else
+            tag="v$version"
+            flags=(--generate-notes)
+            target="$GITHUB_SHA"
+          fi
+          apk="outlook-for-android-$tag.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$apk"
+          sha256sum "$apk" > "$apk.sha256"
+          gh release create "$tag" "$apk" "$apk.sha256" --target "$target" "${flags[@]}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
