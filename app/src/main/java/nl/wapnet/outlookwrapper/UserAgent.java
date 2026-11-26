@@ -15,6 +15,11 @@ final class UserAgent {
                 + "(KHTML, like Gecko) Chrome/" + chrome.group(1) + " Safari/537.36";
     }
 
+    /** Chrome-for-Android identity: drops WebView's "; wv" and "Version/4.0" markers. */
+    static String mobile(String webViewUserAgent) {
+        return webViewUserAgent.replace("; wv)", ")").replaceFirst("Version/[0-9.]+ ", "");
+    }
+
     public static void main(String[] args) {
         String mobile = "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 "
                 + "(KHTML, like Gecko) Version/4.0 Chrome/142.0.7444.48 Mobile Safari/537.36";
@@ -23,6 +28,11 @@ final class UserAgent {
         assert desktop.contains("X11; Linux x86_64");
         assert !desktop.contains("Android");
         assert !desktop.contains("Mobile");
+        String webView = "Mozilla/5.0 (Linux; Android 15; FP5 Build/AP3A; wv) AppleWebKit/537.36 "
+                + "(KHTML, like Gecko) Version/4.0 Chrome/142.0.7444.48 Mobile Safari/537.36";
+        assert ("Mozilla/5.0 (Linux; Android 15; FP5 Build/AP3A) AppleWebKit/537.36 "
+                + "(KHTML, like Gecko) Chrome/142.0.7444.48 Mobile Safari/537.36").equals(mobile(webView));
+        assert mobile(mobile).equals(mobile.replace("Version/4.0 ", ""));
     }
 
     private UserAgent() {}

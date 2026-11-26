@@ -11,4 +11,7 @@
     <string name="theme_system">Follow Android</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
+    <string name="menu_layout">Layout</string>
+    <string name="layout_desktop">Desktop (full Outlook)</string>
+    <string name="layout_lite">Lite (Outlook mobile web)</string>
 </resources>

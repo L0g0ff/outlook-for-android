@@ -34,6 +34,8 @@ public final class MainActivity extends Activity {
     private AlertDialog openDialog;
     private static final String VIEWPORT_WIDTH = "viewport_width";
     private static final String THEME = "theme";
+    // false: desktop Outlook (default). true: Outlook's own mobile web layout, the slimmed-down one.
+    private static final String LITE = "lite";
     // Stored as the index of the Theme menu choice.
     private static final int THEME_SYSTEM = 0, THEME_LIGHT = 1, THEME_DARK = 2;
     // CSS pixels the page lays out in; 0 keeps Outlook's own device-width viewport.
@@ -80,7 +82,11 @@ public final class MainActivity extends Activity {
             settings.setAlgorithmicDarkeningAllowed(true);
         }
         // Desktop identity, Android input: passes platform-scoped "use the Outlook app/Edge" policies.
-        settings.setUserAgentString(UserAgent.desktop(settings.getUserAgentString()));
+        // ponytail: Lite shows Android to Microsoft, so a tenant policy that blocks mobile browsers
+        // (the reason for the desktop UA) blocks Lite too; switching back to Desktop recovers.
+        settings.setUserAgentString(lite()
+                ? UserAgent.mobile(settings.getUserAgentString())
+                : UserAgent.desktop(settings.getUserAgentString()));
         // target=_blank links arrive in onCreateWindow instead of replacing Outlook.
         settings.setSupportMultipleWindows(true);
 
@@ -279,8 +285,8 @@ public final class MainActivity extends Activity {
         if (openDialog != null && openDialog.isShowing()) {
             return;
         }
-        String[] items = {getString(R.string.menu_resolution), getString(R.string.menu_theme)};
-        Runnable[] actions = {this::showResolutionMenu, this::showThemeMenu};
+        String[] items = {getString(R.string.menu_layout), getString(R.string.menu_resolution), getString(R.string.menu_theme)};
+        Runnable[] actions = {this::showLayoutMenu, this::showResolutionMenu, this::showThemeMenu};
         openDialog = new AlertDialog.Builder(this)
                 .setItems(items, (d, which) -> actions[which].run())
                 .show();
@@ -303,6 +309,23 @@ public final class MainActivity extends Activity {
                     getPreferences(MODE_PRIVATE).edit().putInt(VIEWPORT_WIDTH, VIEWPORT_WIDTHS[which]).apply();
                     // Reload so the page starts from its own viewport, then onPageFinished applies the choice.
                     webView.reload();
+                })
+                .show();
+    }
+
+    private boolean lite() {
+        return getPreferences(MODE_PRIVATE).getBoolean(LITE, false);
+    }
+
+    private void showLayoutMenu() {
+        String[] labels = {getString(R.string.layout_desktop), getString(R.string.layout_lite)};
+        openDialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.menu_layout)
+                .setSingleChoiceItems(labels, lite() ? 1 : 0, (d, which) -> {
+                    d.dismiss();
+                    getPreferences(MODE_PRIVATE).edit().putBoolean(LITE, which == 1).apply();
+                    // The User-Agent is set in onCreate; the signed-in session survives in cookies.
+                    recreate();
                 })
                 .show();
     }
