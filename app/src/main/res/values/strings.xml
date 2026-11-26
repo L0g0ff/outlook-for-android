@@ -11,4 +11,7 @@
     <string name="theme_system">Follow Android</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
+    <string name="menu_lite">Lite mode</string>
+    <string name="lite_off">Off (full Outlook)</string>
+    <string name="lite_on">On (hide Copilot and header clutter)</string>
 </resources>
