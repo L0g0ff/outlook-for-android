@@ -1,0 +1,17 @@
+/* Lite mode: hides Outlook on the web clutter. Selectors come from maintained community lists;
+   update from those sources when Outlook ships a change that brings an item back. */
+
+/* Copilot buttons, ribbon group and floating button.
+   EasyList Fanboy's Anti-AI Suggestion List (CC BY 3.0) and AI Off rules (MIT). */
+div#CopilotCommandCenterButton,
+#BottomBar > div:has(> div > #copilot-dab-main-button),
+#copilot-dab-main-button,
+[data-app-section="CopilotDabRibbon"],
+/* Copilot in the left app rail and the "Summary by Copilot" bar (AI Off, MIT). */
+[role="navigation"] [aria-label="Copilot"],
+.fai-CopilotProvider,
+/* App launcher and organisation logo in the header (solarkraft's Declutter Outlook userstyle). */
+#O365_HeaderLeftRegion,
+#owaNoteFeedButton_container {
+    display: none !important;
+}

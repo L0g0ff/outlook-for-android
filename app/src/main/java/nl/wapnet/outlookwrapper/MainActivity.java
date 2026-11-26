@@ -34,6 +34,11 @@ public final class MainActivity extends Activity {
     private AlertDialog openDialog;
     private static final String VIEWPORT_WIDTH = "viewport_width";
     private static final String THEME = "theme";
+    private static final String LITE = "lite";
+    // Adds res/raw/lite.css once per document; Outlook is a single-page app, so it stays in place.
+    private static final String LITE_SCRIPT = "(css=>{if(document.getElementById('owa-lite'))return;"
+            + "const s=document.createElement('style');s.id='owa-lite';s.textContent=css;"
+            + "document.head.appendChild(s)})(%s)";
     // Stored as the index of the Theme menu choice.
     private static final int THEME_SYSTEM = 0, THEME_LIGHT = 1, THEME_DARK = 2;
     // CSS pixels the page lays out in; 0 keeps Outlook's own device-width viewport.
@@ -107,6 +112,7 @@ public final class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 applyViewportWidth();
+                applyLite();
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
@@ -279,8 +285,8 @@ public final class MainActivity extends Activity {
         if (openDialog != null && openDialog.isShowing()) {
             return;
         }
-        String[] items = {getString(R.string.menu_resolution), getString(R.string.menu_theme)};
-        Runnable[] actions = {this::showResolutionMenu, this::showThemeMenu};
+        String[] items = {getString(R.string.menu_lite), getString(R.string.menu_resolution), getString(R.string.menu_theme)};
+        Runnable[] actions = {this::showLiteMenu, this::showResolutionMenu, this::showThemeMenu};
         openDialog = new AlertDialog.Builder(this)
                 .setItems(items, (d, which) -> actions[which].run())
                 .show();
@@ -302,6 +308,40 @@ public final class MainActivity extends Activity {
                     d.dismiss();
                     getPreferences(MODE_PRIVATE).edit().putInt(VIEWPORT_WIDTH, VIEWPORT_WIDTHS[which]).apply();
                     // Reload so the page starts from its own viewport, then onPageFinished applies the choice.
+                    webView.reload();
+                })
+                .show();
+    }
+
+    private boolean lite() {
+        return getPreferences(MODE_PRIVATE).getBoolean(LITE, false);
+    }
+
+    // ponytail: injected after load, so hidden items can flash briefly; document-start injection
+    // needs androidx.webkit, add it if the flash bothers.
+    private void applyLite() {
+        if (lite() && Links.opensInApp(webView.getUrl())) {
+            webView.evaluateJavascript(String.format(LITE_SCRIPT, org.json.JSONObject.quote(liteCss())), null);
+        }
+    }
+
+    private String liteCss() {
+        try (java.io.InputStream in = getResources().openRawResource(R.raw.lite);
+                java.util.Scanner all = new java.util.Scanner(in, "UTF-8").useDelimiter("\\A")) {
+            return all.next();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private void showLiteMenu() {
+        String[] labels = {getString(R.string.lite_off), getString(R.string.lite_on)};
+        openDialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.menu_lite)
+                .setSingleChoiceItems(labels, lite() ? 1 : 0, (d, which) -> {
+                    d.dismiss();
+                    getPreferences(MODE_PRIVATE).edit().putBoolean(LITE, which == 1).apply();
+                    // Reload so turning it off removes the style; onPageFinished applies it when on.
                     webView.reload();
                 })
                 .show();
