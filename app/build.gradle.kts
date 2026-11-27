@@ -44,3 +44,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_21
     }
 }
+
+dependencies {
+    // Origin-restricted page bridge (WebViewCompat.addWebMessageListener); no framework equivalent.
+    implementation("androidx.webkit:webkit:1.15.0")
+}

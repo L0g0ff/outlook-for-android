@@ -22,6 +22,7 @@ jobs:
         run: |
           javac -d "$RUNNER_TEMP/checks" app/src/main/java/nl/wapnet/outlookwrapper/{Links,FileName,UserAgent}.java
           for c in Links FileName UserAgent; do java -ea -cp "$RUNNER_TEMP/checks" "nl.wapnet.outlookwrapper.$c"; done
+      - run: node scripts/check-blob-download.js
       - run: ./gradlew lintDebug assembleRelease
 
   release:
