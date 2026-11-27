@@ -23,12 +23,15 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
 
 public final class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1;
     // At most one picker is open; a recreated Activity starts with null, so a late result is dropped.
     private ValueCallback<Uri[]> fileChooserCallback;
     private WebView webView;
+    private String blobScript;
     private boolean volumeUpDown;
     private boolean volumeDownDown;
     private AlertDialog openDialog;
@@ -88,6 +91,13 @@ public final class MainActivity extends Activity {
         cookies.setAcceptCookie(true);
         cookies.setAcceptThirdPartyCookies(webView, true);
 
+        blobScript = rawText(R.raw.blob_download);
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            // Origin-restricted by WebView: add-in iframes and other sites never see the bridge,
+            // so they cannot write files to Downloads.
+            WebViewCompat.addWebMessageListener(webView, "OutlookAndroid", Links.appOrigins(),
+                    (view, message, origin, isMainFrame, reply) -> saveBlob(message.getData()));
+        }
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, length) ->
                 download(url, userAgent, contentDisposition, mimeType));
         webView.setWebViewClient(new WebViewClient() {
@@ -107,6 +117,9 @@ public final class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 applyViewportWidth();
+                if (Links.opensInApp(url)) {
+                    view.evaluateJavascript(blobScript, null);
+                }
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
@@ -183,9 +196,14 @@ public final class MainActivity extends Activity {
     /** Attachments via Android's DownloadManager with the WebView session cookie for that URL. */
     private void download(String url, String userAgent, String contentDisposition, String mimeType) {
         Uri uri = Uri.parse(url);
+        if ("blob".equalsIgnoreCase(uri.getScheme())) {
+            // A blob: download the click hook in blob_download.js missed: read it in the page instead.
+            String name = FileName.fromContentDisposition(contentDisposition);
+            webView.evaluateJavascript("window.__outlookBlobSave&&__outlookBlobSave("
+                    + org.json.JSONObject.quote(url) + "," + org.json.JSONObject.quote(name == null ? "" : name) + ")", null);
+            return;
+        }
         if (!"https".equalsIgnoreCase(uri.getScheme())) {
-            // ponytail: blob:/data: files are generated inside the page; DownloadManager cannot fetch
-            // them. Add a JavaScript bridge if Outlook turns out to serve attachments this way.
             Toast.makeText(this, getString(R.string.download_unsupported, uri.getScheme()), Toast.LENGTH_LONG).show();
             return;
         }
@@ -206,6 +224,63 @@ public final class MainActivity extends Activity {
         }
         getSystemService(DownloadManager.class).enqueue(request);
         Toast.makeText(this, getString(R.string.download_started, name), Toast.LENGTH_SHORT).show();
+    }
+
+    /** A blob: file from blob_download.js: {data: base64, type, name} or {error}. Runs on the UI thread. */
+    // ponytail: the whole file crosses the bridge as one base64 string; fine for mail attachments
+    // (tens of MB), stream in chunks if larger files fail.
+    private void saveBlob(String json) {
+        try {
+            org.json.JSONObject m = new org.json.JSONObject(json);
+            if (m.has("error")) {
+                blobFailed(m.getString("error"));
+                return;
+            }
+            saveToDownloads(android.util.Base64.decode(m.getString("data"), android.util.Base64.DEFAULT),
+                    m.optString("type"), m.optString("name"));
+        } catch (org.json.JSONException | IllegalArgumentException | java.io.IOException e) {
+            blobFailed(e.toString());
+        }
+    }
+
+    private void blobFailed(String error) {
+        Toast.makeText(this, getString(R.string.download_failed, error), Toast.LENGTH_LONG).show();
+    }
+
+    private void saveToDownloads(byte[] data, String mimeType, String name) throws java.io.IOException {
+        String type = mimeType == null || mimeType.isEmpty() ? "application/octet-stream" : mimeType;
+        String file = FileName.safe(name);
+        file = FileName.withExtension(file == null ? "download" : file,
+                MimeTypeMap.getSingleton().getExtensionFromMimeType(type));
+        if (Build.VERSION.SDK_INT >= 29) {
+            // Public Downloads without a storage permission; MediaStore picks a free name on clashes.
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put(android.provider.MediaStore.Downloads.DISPLAY_NAME, file);
+            values.put(android.provider.MediaStore.Downloads.MIME_TYPE, type);
+            Uri target = getContentResolver().insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (target == null) {
+                throw new java.io.IOException("MediaStore refused " + file);
+            }
+            try (java.io.OutputStream out = getContentResolver().openOutputStream(target)) {
+                out.write(data);
+            }
+        } else {
+            // ponytail: Android 8-9 save to this app's own Downloads folder (no storage permission).
+            try (java.io.OutputStream out = new java.io.FileOutputStream(
+                    new java.io.File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), file))) {
+                out.write(data);
+            }
+        }
+        Toast.makeText(this, getString(R.string.download_saved, file), Toast.LENGTH_LONG).show();
+    }
+
+    private String rawText(int id) {
+        try (java.io.InputStream in = getResources().openRawResource(id);
+                java.util.Scanner all = new java.util.Scanner(in, "UTF-8").useDelimiter("\\A")) {
+            return all.next();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @Override

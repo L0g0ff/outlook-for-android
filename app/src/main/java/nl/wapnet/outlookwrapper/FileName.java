@@ -49,7 +49,7 @@ final class FileName {
     }
 
     /** Strips directories and control characters so a header cannot pick another folder. */
-    private static String safe(String name) {
+    static String safe(String name) {
         if (name == null) {
             return null;
         }

@@ -30,6 +30,17 @@ final class Links {
         }
     }
 
+    /** HTTPS origins of Outlook itself (not sign-in) for the page bridge. */
+    static Set<String> appOrigins() {
+        Set<String> origins = new java.util.HashSet<>();
+        for (String host : APP_HOSTS) {
+            if (host.startsWith("outlook.")) {
+                origins.add("https://" + host);
+            }
+        }
+        return origins;
+    }
+
     /** Schemes safe to hand to Android (browser, mail, dialer). intent:, file:, javascript: etc. are not. */
     static boolean opensExternally(String url) {
         try {
@@ -94,6 +105,7 @@ final class Links {
         assert !opensInApp("https://x@outlook.office.com/");
         assert !opensInApp("https://outlook.office.com:8443/");
         assert !opensInApp("https://example.com/?outlook.office.com");
+        assert appOrigins().contains("https://outlook.office.com") && appOrigins().size() == 4;
         assert opensExternally("https://example.com/") && opensExternally("tel:123");
         assert !opensExternally("intent://x#Intent;end") && !opensExternally("javascript:alert(1)");
         assert (COMPOSE_URL + "?to=a%2Btag%40example.com&subject=Hi%20there&body=a%26b")
